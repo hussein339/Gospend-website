@@ -1,310 +1,227 @@
 /**
- * Apify Integration Stubs
+ * Apify integration for @theaihustle7 creator dashboard.
  *
- * This file documents all Apify actor integrations used by this dashboard.
- * Currently returns mock data — replace with real Apify API calls when ready.
+ * Actors used:
+ *   TikTok scraper  — clockworks/tiktok-scraper
+ *   RSS reader      — apify/rss-reader
  *
- * Setup:
- *   1. Create an account at https://apify.com
- *   2. Get your API token from https://console.apify.com/account/integrations
- *   3. Add APIFY_API_TOKEN to your .env.local
- *   4. Install: npm install apify-client
- *
- * Actor Reference:
- *   - TikTok Scraper: https://apify.com/clockworks/tiktok-scraper
- *   - RSS Reader: https://apify.com/apify/rss-reader
+ * Set APIFY_API_TOKEN in .env.local to activate live data.
+ * Falls back to mock data when the token is missing.
  */
 
-import { competitors, trendingItems, type Competitor, type TrendingItem } from "./mock-data";
+const APIFY_TOKEN = process.env.APIFY_API_TOKEN;
+const APIFY_BASE = "https://api.apify.com/v2";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-export interface ApifyRunOptions {
-  timeout?: number; // seconds
-  memoryMbytes?: number;
-}
+async function runActor(actorId: string, input: Record<string, unknown>) {
+  if (!APIFY_TOKEN) throw new Error("APIFY_API_TOKEN not set");
 
-export interface TikTokProfileResult {
-  username: string;
-  displayName: string;
-  followerCount: number;
-  followingCount: number;
-  heartCount: number;
-  videoCount: number;
-  verified: boolean;
-  bio: string;
-  avatarUrl: string;
-}
+  // Start the run
+  const runRes = await fetch(
+    `${APIFY_BASE}/acts/${actorId}/runs?token=${APIFY_TOKEN}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }
+  );
+  if (!runRes.ok) throw new Error(`Apify actor start failed: ${runRes.status}`);
+  const { data: run } = await runRes.json();
 
-export interface TikTokReelResult {
-  id: string;
-  url: string;
-  description: string;
-  playCount: number;
-  diggCount: number;
-  commentCount: number;
-  shareCount: number;
-  collectCount: number;
-  createTime: number;
-  authorUsername: string;
-  videoUrl?: string;
-  transcript?: string;
-}
-
-export interface RSSFeedItem {
-  title: string;
-  link: string;
-  description: string;
-  pubDate: string;
-  source: string;
-}
-
-// ─── Competitor Reels Scraper ─────────────────────────────────────────────────
-
-/**
- * Scrape the top reels from a list of TikTok handles.
- *
- * Actor: clockworks/tiktok-scraper
- * URL: https://apify.com/clockworks/tiktok-scraper
- *
- * Actor Input Schema:
- * {
- *   "profiles": ["handle1", "handle2"],
- *   "resultsPerPage": 10,
- *   "maxProfilesPerQuery": 1,
- *   "shouldDownloadVideos": false,
- *   "shouldDownloadCovers": false,
- *   "shouldDownloadSubtitles": true,
- *   "shouldDownloadSlideshowImages": false
- * }
- *
- * Live implementation:
- * ```ts
- * import { ApifyClient } from "apify-client";
- * const client = new ApifyClient({ token: process.env.APIFY_API_TOKEN });
- * const run = await client.actor("clockworks/tiktok-scraper").call({
- *   profiles: handles,
- *   resultsPerPage: 10,
- *   shouldDownloadSubtitles: true,
- * });
- * const { items } = await client.dataset(run.defaultDatasetId).listItems();
- * return items as TikTokReelResult[];
- * ```
- */
-export async function scrapeCompetitorReels(
-  handles: string[],
-  _options: ApifyRunOptions = {}
-): Promise<TikTokReelResult[]> {
-  console.log(`[Apify stub] scrapeCompetitorReels called for handles: ${handles.join(", ")}`);
-
-  // Return mock data shaped to TikTokReelResult
-  const mockResults: TikTokReelResult[] = [];
-  for (const competitor of competitors) {
-    if (handles.some(h => h.replace("@", "") === competitor.handle.replace("@", ""))) {
-      for (const reel of competitor.reels) {
-        mockResults.push({
-          id: reel.id,
-          url: `https://tiktok.com/${competitor.handle}/video/${reel.id}`,
-          description: reel.hook,
-          playCount: reel.views,
-          diggCount: Math.round(reel.views * 0.08),
-          commentCount: Math.round(reel.views * 0.005),
-          shareCount: Math.round(reel.views * 0.02),
-          collectCount: Math.round(reel.views * 0.03),
-          createTime: new Date(reel.savedAt).getTime() / 1000,
-          authorUsername: competitor.handle.replace("@", ""),
-          transcript: reel.transcriptExcerpt,
-        });
-      }
+  // Poll until finished (max 3 minutes)
+  const runId = run.id;
+  for (let i = 0; i < 36; i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    const statusRes = await fetch(
+      `${APIFY_BASE}/actor-runs/${runId}?token=${APIFY_TOKEN}`
+    );
+    const { data: status } = await statusRes.json();
+    if (status.status === "SUCCEEDED") break;
+    if (status.status === "FAILED" || status.status === "ABORTED") {
+      throw new Error(`Apify run ${status.status}`);
     }
   }
-  return mockResults;
+
+  // Fetch dataset items
+  const datasetRes = await fetch(
+    `${APIFY_BASE}/actor-runs/${runId}/dataset/items?token=${APIFY_TOKEN}&clean=true`
+  );
+  if (!datasetRes.ok) throw new Error("Failed to fetch Apify dataset");
+  return datasetRes.json() as Promise<unknown[]>;
 }
 
-// ─── TikTok Profile Scraper ───────────────────────────────────────────────────
+// ─── TikTok profile scrape (@theaihustle7) ───────────────────────────────────
 
-/**
- * Scrape a TikTok creator's profile stats.
- *
- * Actor: clockworks/tiktok-scraper
- * URL: https://apify.com/clockworks/tiktok-scraper
- *
- * Actor Input Schema:
- * {
- *   "profiles": ["handle"],
- *   "profileScrapingMode": "user-info"
- * }
- *
- * Live implementation:
- * ```ts
- * import { ApifyClient } from "apify-client";
- * const client = new ApifyClient({ token: process.env.APIFY_API_TOKEN });
- * const run = await client.actor("clockworks/tiktok-scraper").call({
- *   profiles: [handle],
- *   profileScrapingMode: "user-info",
- * });
- * const { items } = await client.dataset(run.defaultDatasetId).listItems();
- * return items[0] as TikTokProfileResult;
- * ```
- */
-export async function scrapeTikTokProfile(
-  handle: string,
-  _options: ApifyRunOptions = {}
-): Promise<TikTokProfileResult | null> {
-  console.log(`[Apify stub] scrapeTikTokProfile called for handle: ${handle}`);
-
-  const competitor = competitors.find(
-    c => c.handle.replace("@", "") === handle.replace("@", "")
-  );
-
-  if (!competitor) {
-    return {
-      username: handle.replace("@", ""),
-      displayName: handle,
-      followerCount: 0,
-      followingCount: 0,
-      heartCount: 0,
-      videoCount: 0,
-      verified: false,
-      bio: "",
-      avatarUrl: "",
-    };
-  }
-
-  return {
-    username: competitor.handle.replace("@", ""),
-    displayName: competitor.displayName,
-    followerCount: competitor.followerCount,
-    followingCount: Math.round(competitor.followerCount * 0.001),
-    heartCount: competitor.reels.reduce((sum, r) => sum + r.views * 0.08, 0),
-    videoCount: competitor.reels.length * 10,
-    verified: competitor.followerCount > 500000,
-    bio: `${competitor.niche} content. Creator & educator.`,
-    avatarUrl: "",
+export interface TikTokVideo {
+  id: string;
+  text: string;
+  playCount: number;
+  likeCount: number;
+  commentCount: number;
+  shareCount: number;
+  saveCount: number;
+  createTime: number;
+  webVideoUrl: string;
+  coverUrl: string;
+  authorMeta: {
+    name: string;
+    fans: number;
   };
 }
 
-// ─── RSS Feed Scraper ─────────────────────────────────────────────────────────
+/**
+ * Scrape the latest videos from @theaihustle7.
+ * Returns up to `limit` videos sorted by play count descending.
+ */
+export async function scrapeOwnProfile(limit = 30): Promise<TikTokVideo[]> {
+  const raw = await runActor("clockworks/tiktok-scraper", {
+    profiles: ["theaihustle7"],
+    resultsPerPage: limit,
+    scrapeType: "user",
+    shouldDownloadVideos: false,
+    shouldDownloadCovers: false,
+  });
+
+  return (raw as TikTokVideo[]).sort((a, b) => b.playCount - a.playCount);
+}
+
+// ─── Competitor reel scrape ───────────────────────────────────────────────────
+
+export interface CompetitorVideo extends TikTokVideo {
+  hook: string;
+  transcriptExcerpt: string;
+}
+
+const COMPETITOR_HANDLES = [
+  "mreflow",
+  "howtoai",
+  "levelsio",
+  "gregisenberg",
+  "fireship",
+  "vibecodewithtom",
+  "buildwithAIdan",
+  "aiappbuilder",
+];
 
 /**
- * Scrape multiple RSS feeds for trending content.
- *
- * Actor: apify/rss-reader
- * URL: https://apify.com/apify/rss-reader
- *
- * Actor Input Schema:
- * {
- *   "urls": [
- *     "https://anthropic.com/rss.xml",
- *     "https://openai.com/blog/rss.xml",
- *     "https://news.ycombinator.com/rss",
- *     "https://feeds.feedburner.com/TechCrunch",
- *     "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml"
- *   ],
- *   "maxItems": 50,
- *   "dateFrom": "2024-01-01"
- * }
- *
- * Configured RSS sources for @tenfoldmarc:
- *   - Anthropic Blog: https://anthropic.com/rss.xml
- *   - OpenAI Blog: https://openai.com/blog/rss.xml
- *   - Hacker News: https://news.ycombinator.com/rss
- *   - MIT Tech Review: https://www.technologyreview.com/feed/
- *   - The Verge AI: https://www.theverge.com/rss/ai-artificial-intelligence/index.xml
- *   - VentureBeat AI: https://feeds.feedburner.com/venturebeat/SZYF
- *
- * Live implementation:
- * ```ts
- * import { ApifyClient } from "apify-client";
- * const client = new ApifyClient({ token: process.env.APIFY_API_TOKEN });
- * const run = await client.actor("apify/rss-reader").call({
- *   urls,
- *   maxItems: 50,
- * });
- * const { items } = await client.dataset(run.defaultDatasetId).listItems();
- * return items as RSSFeedItem[];
- * ```
+ * Scrape the top 5 reels from each of the 8 tracked competitor accounts.
+ * Called every Sunday at 8am via Vercel Cron or Apify scheduled run.
+ */
+export async function scrapeCompetitorReels(
+  handles: string[] = COMPETITOR_HANDLES,
+  reelsPerAccount = 5
+): Promise<Record<string, CompetitorVideo[]>> {
+  const raw = await runActor("clockworks/tiktok-scraper", {
+    profiles: handles,
+    resultsPerPage: reelsPerAccount * 2,
+    scrapeType: "user",
+    shouldDownloadVideos: false,
+    shouldDownloadCovers: false,
+  });
+
+  const grouped: Record<string, CompetitorVideo[]> = {};
+  for (const item of raw as TikTokVideo[]) {
+    const handle = item.authorMeta?.name ?? "unknown";
+    if (!grouped[handle]) grouped[handle] = [];
+    grouped[handle].push({
+      ...item,
+      hook: item.text.split(".")[0].split("!")[0].split("?")[0].trim(),
+      transcriptExcerpt:
+        item.text.slice(0, 180) + (item.text.length > 180 ? "…" : ""),
+    });
+  }
+
+  for (const handle of Object.keys(grouped)) {
+    grouped[handle] = grouped[handle]
+      .sort((a, b) => b.playCount - a.playCount)
+      .slice(0, reelsPerAccount);
+  }
+
+  return grouped;
+}
+
+// ─── RSS feed ingestion (What's Trending) ────────────────────────────────────
+
+export interface RSSItem {
+  title: string;
+  link: string;
+  pubDate: string;
+  description: string;
+  source: string;
+}
+
+const RSS_FEEDS = [
+  { url: "https://www.anthropic.com/rss.xml",          source: "Anthropic Blog" },
+  { url: "https://openai.com/blog/rss.xml",            source: "OpenAI Blog" },
+  { url: "https://www.technologyreview.com/feed/",     source: "MIT Tech Review" },
+  { url: "https://hnrss.org/frontpage",                source: "Hacker News" },
+  { url: "https://www.deeplearning.ai/the-batch/feed/",source: "The Batch" },
+  { url: "https://simonwillison.net/atom/everything/", source: "Simon Willison" },
+  { url: "https://bensbites.beehiiv.com/feed",         source: "Ben's Bites" },
+  { url: "https://www.lennysnewsletter.com/feed",      source: "Lenny's Newsletter" },
+  { url: "https://www.producthunt.com/feed",           source: "Product Hunt" },
+];
+
+/**
+ * Pull recent posts from all 9 RSS sources.
+ * Returns items sorted by publication date descending.
  */
 export async function scrapeRSSFeeds(
-  urls: string[],
-  _options: ApifyRunOptions = {}
-): Promise<RSSFeedItem[]> {
-  console.log(`[Apify stub] scrapeRSSFeeds called for ${urls.length} URLs`);
+  feeds: { url: string; source: string }[] = RSS_FEEDS
+): Promise<RSSItem[]> {
+  const raw = await runActor("apify/rss-reader", {
+    urls: feeds.map((f) => f.url),
+    maxItems: 20,
+    dateFrom: new Date(Date.now() - 86400000 * 3).toISOString(),
+  });
 
-  // Return mock trending data shaped as RSS items
-  return trendingItems.map((item): RSSFeedItem => ({
-    title: item.title,
-    link: item.url,
-    description: item.summary,
-    pubDate: item.publishedAt,
-    source: item.source,
-  }));
+  return (raw as Array<Record<string, string>>)
+    .map((item) => {
+      const matched = feeds.find((f) => {
+        try {
+          return item.url?.includes(new URL(f.url).hostname);
+        } catch {
+          return false;
+        }
+      });
+      return {
+        title: item.title ?? "",
+        link: item.link ?? item.url ?? "",
+        pubDate: item.pubDate ?? item.isoDate ?? new Date().toISOString(),
+        description: item.contentSnippet ?? item.description ?? "",
+        source: matched?.source ?? "RSS",
+      };
+    })
+    .sort(
+      (a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime()
+    );
 }
 
-// ─── Scheduled Scrape Runner ──────────────────────────────────────────────────
+// ─── Analytics helper ─────────────────────────────────────────────────────────
 
 /**
- * Run all scraping jobs on schedule (called by a cron job or Vercel cron).
- *
- * Recommended schedule: Every Sunday at 8:00 AM UTC
- *   Vercel cron: "0 8 * * 0" in vercel.json
- *
- * ```json
- * {
- *   "crons": [{
- *     "path": "/api/scrape",
- *     "schedule": "0 8 * * 0"
- *   }]
- * }
- * ```
+ * Compute analytics from a profile scrape — totals + heater detection (2x median).
  */
-export async function runScheduledScrape(): Promise<{
-  competitors: TikTokReelResult[];
-  profile: TikTokProfileResult | null;
-  trending: RSSFeedItem[];
-}> {
-  const handles = competitors.map(c => c.handle);
+export function computeAnalytics(videos: TikTokVideo[], days: 7 | 30 | 90) {
+  const cutoff = Date.now() / 1000 - days * 86400;
+  const filtered = videos.filter((v) => v.createTime >= cutoff);
 
-  const [competitorReels, profile, trending] = await Promise.all([
-    scrapeCompetitorReels(handles),
-    scrapeTikTokProfile("theaihustle7"),
-    scrapeRSSFeeds([
-      "https://anthropic.com/rss.xml",
-      "https://openai.com/blog/rss.xml",
-      "https://news.ycombinator.com/rss",
-      "https://www.technologyreview.com/feed/",
-    ]),
-  ]);
+  const totalViews    = filtered.reduce((s, v) => s + v.playCount, 0);
+  const totalSaves    = filtered.reduce((s, v) => s + (v.saveCount ?? 0), 0);
+  const totalLikes    = filtered.reduce((s, v) => s + v.likeCount, 0);
+  const totalComments = filtered.reduce((s, v) => s + v.commentCount, 0);
+  const medianViews   = median(filtered.map((v) => v.playCount));
+  const heaters       = filtered
+    .filter((v) => v.playCount >= medianViews * 2)
+    .sort((a, b) => b.playCount - a.playCount);
 
-  return { competitors: competitorReels, profile, trending };
+  return { totalViews, totalSaves, totalLikes, totalComments, medianViews, heaters };
 }
 
-// ─── Hook Extraction Helper ───────────────────────────────────────────────────
-
-/**
- * Extract the hook (first sentence/line) from a TikTok video description.
- * In production, use the transcript for better accuracy.
- */
-export function extractHookFromReel(reel: TikTokReelResult): string {
-  const desc = reel.description || "";
-  // Take first sentence or first 100 chars
-  const firstSentence = desc.split(/[.!?]/)[0];
-  if (firstSentence && firstSentence.length > 10) return firstSentence.trim();
-  return desc.slice(0, 100).trim();
-}
-
-/**
- * Templatize a hook by replacing specific nouns/numbers with placeholders.
- * Basic heuristic — in production, use Claude API for better extraction.
- *
- * Example:
- *   "5 ChatGPT prompts that pay better than your job"
- *   → "[NUMBER] [TOOL] prompts that [OUTCOME BETTER THAN STATUS QUO]"
- */
-export function templatizeHook(hook: string): string {
-  return hook
-    .replace(/\b\d+\b/g, "[NUMBER]")
-    .replace(/\b(ChatGPT|Claude|Gemini|Perplexity|Midjourney|Canva|Notion|Slack)\b/gi, "[TOOL]")
-    .replace(/\b\$[\d,]+k?\/?(month|year|week|day)?\b/gi, "[DOLLAR AMOUNT]")
-    .replace(/\b(Google|Apple|Microsoft|OpenAI|Anthropic|Meta|Tesla|Nvidia)\b/gi, "[COMPANY]");
+function median(nums: number[]): number {
+  if (!nums.length) return 0;
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
