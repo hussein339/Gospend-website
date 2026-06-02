@@ -28,9 +28,9 @@ function formatFollowers(n: number): string {
 
 const nicheColors: Record<HookNiche, string> = {
   AI: "terra",
-  Finance: "blue",
-  Productivity: "purple",
-  Fitness: "success",
+  Claude: "blue",
+  "Vibe Coding": "purple",
+  "App Building": "success",
   Business: "orange",
 };
 
@@ -117,9 +117,9 @@ export default function HookVaultPage() {
             <SelectContent>
               <SelectItem value="all">All Niches</SelectItem>
               <SelectItem value="AI">AI</SelectItem>
-              <SelectItem value="Finance">Finance</SelectItem>
-              <SelectItem value="Productivity">Productivity</SelectItem>
-              <SelectItem value="Fitness">Fitness</SelectItem>
+              <SelectItem value="Claude">Claude</SelectItem>
+              <SelectItem value="Vibe Coding">Vibe Coding</SelectItem>
+              <SelectItem value="App Building">App Building</SelectItem>
               <SelectItem value="Business">Business</SelectItem>
             </SelectContent>
           </Select>
