@@ -54,10 +54,10 @@ export function Sidebar() {
       <div className="p-5 border-b border-[#2A2A2A]">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-[#C05A38] flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-            TM
+            AH
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-[#E8E8E8] truncate">@tenfoldmarc</p>
+            <p className="text-sm font-semibold text-[#E8E8E8] truncate">@theaihustle7</p>
             <p className="text-xs text-[#888888] truncate">The AI Hustle</p>
           </div>
         </div>
